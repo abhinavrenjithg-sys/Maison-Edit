@@ -19,7 +19,7 @@ serve.mjs            small local web server, no dependencies
 - **Outfits**: save the current look, rename it, wear it again or add it all to the bag; stylist picks included
 - **Profile**: size and height (used in the fit notes), orders, clear data
 - **Your face**: take a selfie or upload a photo, fit it in the oval, and it is blended onto the model
-- **3D avatar ("You" view)**: a figure built in the browser from your height, size, skin tone and hair, with your face from the photo, wearing 3D versions of the selected pieces; drag to turn it 360°. Uses three.js, no AI service, nothing uploaded
+- **3D avatar ("You" view)**: a sculpted figure built in the browser from your height, size, skin tone and hair, with your face from the photo, wearing fitted 3D versions of the selected pieces (knit, denim, tweed, leather textures), studio lighting and soft shadows; drag to turn it 360°. Uses three.js, no AI service, nothing uploaded
 - Saved pieces, bag, outfits, orders and the current look are kept on the device between visits
 - Phone layout with a fixed top bar and bottom tab bar; Android back button closes open panels first
 

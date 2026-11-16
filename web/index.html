@@ -10,6 +10,7 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Maison Edit — Build Your Look</title>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,wght@0,500;0,600;1,500;1,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -1526,7 +1527,13 @@ if (bag.length) $('#badge').classList.add('on');
 if ('serviceWorker' in navigator && location.protocol !== 'file:' && location.hostname !== 'appassets.androidplatform.net') {
   addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
-addEventListener('resize', () => { moveUL(); setMode(stage.classList.contains('ar') ? 'ar' : '3d'); });
+const curMode = () => stage.classList.contains('ar') ? 'ar' : stage.classList.contains('me') ? 'me' : '3d';
+addEventListener('resize', () => {
+  moveUL();
+  // only move the pill highlight; re-running setMode would restart the AR scan
+  const b = document.querySelector(`.mb[data-m="${curMode()}"]`);
+  ind.style.width = b.offsetWidth + 'px'; ind.style.transform = `translateX(${b.offsetLeft}px)`;
+});
 (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => { moveUL(); setMode('3d'); });
 setMode('3d');
 
