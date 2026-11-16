@@ -238,6 +238,21 @@ svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stro
 .form input{height:42px;border-radius:8px;border:1px solid var(--line);background:#fff;padding:0 12px;font:inherit}
 .form input:focus{outline:0;border-color:var(--ink)}
 .note{color:var(--mute);font-size:.9em;line-height:1.5}
+#me3d{position:absolute;left:-30%;right:-30%;top:-2%;bottom:0;z-index:3;opacity:0;pointer-events:none;transition:opacity .45s;cursor:grab;touch-action:pan-y}
+#me3d.dragging{cursor:grabbing}
+#me3d canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.me-load{position:absolute;left:50%;top:45%;transform:translate(-50%,-50%);color:var(--mute);font-size:12px;white-space:nowrap}
+#body{transition:opacity .45s}
+#stage.me #me3d{opacity:1;pointer-events:auto}
+#stage.me #body{opacity:0;pointer-events:none}
+#meBar{position:absolute;left:50%;bottom:calc(var(--H)*.02);transform:translate(-50%,12px);z-index:6;display:flex;align-items:center;gap:6px;background:#fbfaf8;box-shadow:var(--soft);border-radius:18px;padding:7px 14px;font-weight:500;opacity:0;pointer-events:none;transition:opacity .35s,transform .35s var(--ease)}
+#meBar svg.i{width:15px;height:15px}
+#stage.me #meBar{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
+.sws{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 18px}
+.sw{width:34px;height:34px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12);position:relative;display:grid;place-items:center;font-size:9px;font-weight:600;color:var(--ink-2)}
+.sw.on::after{content:'';position:absolute;inset:-4px;border-radius:50%;box-shadow:0 0 0 1.5px var(--ink)}
+.av-face{display:flex;align-items:center;gap:14px;margin:8px 0 18px}
+.av-face canvas{width:60px;height:78px;border-radius:50%;background:var(--tile);flex:none}
 .fe-hero{display:flex;justify-content:center;padding:28px 0 18px}
 .fe-oval{width:120px;height:156px;border-radius:50%;border:1.5px dashed #c9c4bc;display:grid;place-items:center;color:var(--mute)}
 .fe-oval svg.i{width:56px;height:56px;stroke-width:1.2}
@@ -326,6 +341,7 @@ svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stro
         <div class="ttl"><svg class="al" viewBox="0 0 34 12"><path d="M32 4C24 11 12 11 3 6"/><path d="M3 6l4.5-2.6M3 6l4 3"/></svg><span>360°</span><svg class="ar" viewBox="0 0 34 12"><path d="M2 4c8 7 20 7 29 2"/><path d="M31 6l-4.5-2.6M31 6l-4 3"/></svg></div>
       </div>
       <div id="shadow"></div>
+      <div id="me3d"><div class="me-load">Building your avatar…</div></div>
       <div id="body"><div id="spin">
         <canvas id="cOld" width="1000" height="1506"></canvas>
         <canvas id="cNew" width="1000" height="1506"></canvas>
@@ -343,7 +359,8 @@ svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stro
       <button class="rb" id="ai" data-tip="AI stylist · surprise me"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></svg></button>
     </div>
     <div id="strip"></div>
-    <div id="mode"><span class="ind"></span><button class="mb on" data-m="3d">3D</button><button class="mb" data-m="ar">AR</button></div>
+    <div id="mode"><span class="ind"></span><button class="mb on" data-m="3d">3D</button><button class="mb" data-m="ar">AR</button><button class="mb" data-m="me">You</button></div>
+    <button id="meBar"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 21c.8-4.6 3.6-7 7-7s6.2 2.4 7 7"/></svg>Edit my avatar</button>
   </section>
 
   <section id="right">
@@ -442,6 +459,7 @@ let bag = Array.isArray(DB.bag) ? DB.bag.filter(b => P[b.k] && b.q > 0) : [];
 let outfits = Array.isArray(DB.outfits) ? DB.outfits.filter(o => validLook(o.look)) : [];
 let orders = Array.isArray(DB.orders) ? DB.orders : [];
 let profile = Object.assign({ size: 'M', height: 165, name: '', email: '', address: '' }, DB.profile);
+profile.avatar = Object.assign({ skin: 'auto', hair: '#1d1714', style: 'bob' }, profile.avatar);
 function persist() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({ look, saved: [...saved], bag, outfits, orders, profile }));
@@ -811,6 +829,7 @@ function sync(changed = []) {
   renderRecs();
   $('#undo').disabled = !hist.length;
   persist();
+  refreshAvatar();
 }
 
 /* ---------- rail ---------- */
@@ -863,7 +882,7 @@ function openDrawer(view) {
   if (!drawerView) lastFocus = document.activeElement;
   drawerView = view; renderDrawer();
   drawer.classList.add('on'); scrim.classList.add('on');
-  setTB(view === 'outfits' ? 'outfits' : view === 'profile' || view === 'face' ? 'profile' : F.saved ? 'saved' : 'explore');
+  setTB(view === 'outfits' ? 'outfits' : view === 'profile' || view === 'face' || view === 'avatar' ? 'profile' : F.saved ? 'saved' : 'explore');
   $('#dClose').focus();
 }
 function closeDrawer() {
@@ -888,6 +907,7 @@ function renderDrawer() {
   if (v === 'outfits') return renderOutfits();
   if (v === 'profile') return renderProfile();
   if (v === 'face') return renderFace();
+  if (v === 'avatar') return renderAvatarSettings();
 }
 
 /* ---------- face editor ---------- */
@@ -940,7 +960,7 @@ function applyFace(save) {
   bakeFace();
   const src = bake.toDataURL('image/webp', .9); // keeps transparency; browsers without WebP give PNG
   const i = new Image();
-  i.onload = () => { faceImg = i; redrawModel(); };
+  i.onload = () => { faceImg = i; faceVer++; redrawModel(); refreshAvatar(); };
   i.src = src;
   if (save) {
     Object.assign(profile.face, { src, x: ed.x, y: ed.y, s: ed.s });
@@ -1069,16 +1089,135 @@ function wireFaceEditor() {
     const r = stage.getBoundingClientRect();
     zoomTo(ed.s * (e.deltaY < 0 ? 1.08 : 1 / 1.08), (e.clientX - r.left) * k(), (e.clientY - r.top) * k());
   }, { passive: false });
-  $('#feOn').addEventListener('change', e => { f.on = e.target.checked; persist(); redrawModel(); updateFaceBtn(); });
+  $('#feOn').addEventListener('change', e => { f.on = e.target.checked; faceVer++; persist(); redrawModel(); updateFaceBtn(); refreshAvatar(); });
   $('#feDel').addEventListener('click', () => {
     if (!confirm('Remove your face photo from this device?')) return;
-    profile.face = null; faceImg = null; ed = null; persist(); redrawModel(); updateFaceBtn(); renderDrawer();
+    profile.face = null; faceImg = null; ed = null; faceVer++; persist(); redrawModel(); updateFaceBtn(); refreshAvatar(); renderDrawer();
     toast('Face removed');
   });
   $('#feDone').addEventListener('click', () => { applyFace(true); closeDrawer(); toast('Your face is on the model'); });
 }
 function updateFaceBtn() {
   $('#faceBtn').classList.toggle('on', !!(profile.face && profile.face.on && profile.face.src));
+}
+
+/* ---------- 3D avatar ("You" view) ---------- */
+let faceVer = 0, avatar = null, avatarP = null, PCOL = null;
+const SKINS = ['#f3d7c2', '#e8c2a4', '#d4a17f', '#b07a55', '#8a5a3c', '#5e3b28'];
+const HAIRS = ['#1d1714', '#3b2a20', '#6b4a32', '#a77b4f', '#d8b67a', '#8c8c8c'];
+const hex = rgb => '#' + rgb.map(v => Math.round(clamp(v, 0, 255)).toString(16).padStart(2, '0')).join('');
+function faceCanvas() {
+  if (!(faceImg && profile.face && profile.face.on)) return null;
+  const c = document.createElement('canvas'); c.width = FW; c.height = FH;
+  const x = c.getContext('2d');
+  x.drawImage(faceImg, 0, 0, FW, FH);
+  x.globalCompositeOperation = 'destination-in';
+  x.save(); x.translate(FW / 2, FH / 2); x.scale(1, FH / FW);
+  const g = x.createRadialGradient(0, 0, 0, 0, 0, FW / 2), soft = profile.face.soft ?? .3;
+  g.addColorStop(0, '#000'); g.addColorStop(1 - soft, '#000'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = g; x.fillRect(-FW / 2, -FW / 2, FW, FW); x.restore();
+  return c;
+}
+let skinCache = { v: -1, hex: null };
+function skinHex() {
+  const a = profile.avatar;
+  if (a.skin !== 'auto') return a.skin;
+  if (skinCache.v === faceVer && skinCache.hex) return skinCache.hex;
+  let rgb = null;
+  if (faceImg && profile.face && profile.face.on) {
+    try {
+      const c = document.createElement('canvas'); c.width = 40; c.height = 40;
+      const x = c.getContext('2d');
+      x.drawImage(faceImg, FW * .3, FH * .38, FW * .4, FH * .3, 0, 0, 40, 40);
+      const d = x.getImageData(0, 0, 40, 40).data;
+      let covered = 0; for (let i = 3; i < d.length; i += 4) if (d[i] >= 200) covered++;
+      const m = meanRGB(d);
+      // only trust the photo when the cheeks are really in the oval and look like skin
+      if (m && covered > 1600 * .6 && m[0] >= m[2] && m[0] - m[2] > 12 && .299 * m[0] + .587 * m[1] + .114 * m[2] > 55) rgb = m;
+    } catch {}
+  }
+  if (!rgb && IM.base) rgb = modelSkin();
+  skinCache = { v: faceVer, hex: rgb ? hex(rgb) : '#e8c2a4' };
+  return skinCache.hex;
+}
+function productColors() {
+  // colour of each product, read from the product photos (lighter tile background is ignored)
+  if (PCOL) return Promise.resolve(PCOL);
+  return load(SHEET).then(img => {
+    const out = {};
+    try {
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+      const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(img, 0, 0);
+      const k = img.width / 1744;
+      KEYS.forEach(key => {
+        const p = P[key], TX = [44, 610, 1177][p.c], TY = [42, 611, 1180, 1749][p.r];
+        const d = x.getImageData((TX + 523 * .2) * k, (TY + 537 * .15) * k, 523 * .6 * k, 537 * .7 * k).data;
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          if (Math.abs(d[i] - 235) + Math.abs(d[i + 1] - 233) + Math.abs(d[i + 2] - 229) < 60) continue;
+          r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
+        }
+        if (n > 200) out[key] = hex([r / n, g / n, b / n]);
+      });
+    } catch { /* photo not readable: built-in colours are used */ }
+    return PCOL = out;
+  });
+}
+function avatarState() {
+  const a = profile.avatar;
+  return {
+    look: { ...look }, colors: PCOL || {}, size: profile.size, height: profile.height,
+    skin: skinHex(), hair: a.hair, hairStyle: a.style,
+    face: faceCanvas(), faceKey: String(faceVer) + (profile.face && profile.face.on ? 'y' : 'n')
+  };
+}
+function refreshAvatar() { if (avatar) avatar.update(avatarState()); }
+function ensureAvatar() {
+  if (avatarP) return avatarP;
+  avatarP = Promise.all([import('./avatar.js'), productColors()])
+    .then(([m]) => m.createAvatar($('#me3d'), avatarState()))
+    .then(a => {
+      avatar = a; $('#me3d .me-load')?.remove();
+      a.setActive(stage.classList.contains('me'));
+      return a;
+    })
+    .catch(() => {
+      avatarP = null;
+      toast('Could not load 3D. Check your internet connection');
+      setMode('3d');
+    });
+  return avatarP;
+}
+
+function renderAvatarSettings() {
+  $('#dTitle').textContent = 'My avatar';
+  const a = profile.avatar, hasFace = !!(profile.face && profile.face.src);
+  const sw = (list, cur, key, auto) => `<div class="sws" data-key="${key}">${auto ? `<button class="sw${cur === 'auto' ? ' on' : ''}" data-v="auto" style="background:conic-gradient(${SKINS.join(',')},${SKINS[0]})" aria-label="Match my photo" title="Match my photo"></button>` : ''}${list.map(c => `<button class="sw${c === cur ? ' on' : ''}" data-v="${c}" style="background:${c}" aria-label="${c}"></button>`).join('')}</div>`;
+  dBody.innerHTML = `<div class="lab">FACE</div>
+    <div class="av-face"><canvas id="avFace" width="${FW}" height="${FH}"></canvas><div>
+      <p class="note" style="margin-bottom:8px">${hasFace ? 'Your photo is used for the face.' : 'Add a selfie or photo and it becomes your avatar’s face.'}</p>
+      <button class="btn ghost" id="avFaceBtn" style="height:38px;width:auto;padding:0 16px">${hasFace ? 'Edit face' : 'Add my face'}</button></div></div>
+    <div class="lab">SIZE</div>
+    <div class="seg" id="avSize">${['XS', 'S', 'M', 'L', 'XL'].map(s => `<button class="${s === profile.size ? 'on' : ''}" data-s="${s}">${s}</button>`).join('')}</div>
+    <div class="lab">HEIGHT</div>
+    <label class="fld"><input id="avH" type="number" min="120" max="220" value="${profile.height}" inputmode="numeric"> cm</label>
+    <div class="lab">SKIN TONE</div>${sw(SKINS, a.skin, 'skin', true)}
+    <div class="lab">HAIR COLOUR</div>${sw(HAIRS, a.hair, 'hair')}
+    <div class="lab">HAIR STYLE</div>
+    <div class="seg" id="avStyle">${[['bob', 'Bob'], ['long', 'Long'], ['bun', 'Bun']].map(([v, l]) => `<button class="${v === a.style ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
+    <p class="note">Your avatar is built on this device. Nothing is uploaded.</p>`;
+  dFoot.innerHTML = '<button class="btn" id="avSee">See my 3D avatar</button>';
+  const fc = faceCanvas(); if (fc) $('#avFace').getContext('2d').drawImage(fc, 0, 0);
+  const changed = () => { persist(); refreshAvatar(); renderDrawer(); };
+  $('#avFaceBtn').addEventListener('click', () => { drawerView = 'face'; renderDrawer(); });
+  $('#avSize').addEventListener('click', e => { const b = e.target.closest('[data-s]'); if (!b) return; profile.size = b.dataset.s; updateFitCopy(); changed(); });
+  $('#avH').addEventListener('change', e => { profile.height = clamp(+e.target.value || 165, 120, 220); updateFitCopy(); changed(); });
+  $('#avStyle').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (!b) return; a.style = b.dataset.v; changed(); });
+  dBody.querySelectorAll('.sws').forEach(box => box.addEventListener('click', e => {
+    const b = e.target.closest('[data-v]'); if (!b) return;
+    a[box.dataset.key] = b.dataset.v; changed();
+  }));
+  $('#avSee').addEventListener('click', () => { closeDrawer(); setMode('me'); });
 }
 
 function renderBag() {
@@ -1198,7 +1337,8 @@ function renderProfile() {
   dBody.innerHTML = `<div class="lab">YOUR SIZE</div>
     <div class="seg" id="sizes">${sizes.map(s => `<button class="${s === profile.size ? 'on' : ''}" data-s="${s}">${s}</button>`).join('')}</div>
     <div class="lab">YOUR MODEL</div>
-    <button class="btn ghost" id="toFace" style="margin:8px 0 18px">${profile.face && profile.face.src ? 'Edit my face on the model' : 'Put my face on the model'}</button>
+    <button class="btn ghost" id="toFace" style="margin:8px 0 8px">${profile.face && profile.face.src ? 'Edit my face on the model' : 'Put my face on the model'}</button>
+    <button class="btn ghost" id="toAvatar" style="margin:0 0 18px">Build my 3D avatar</button>
     <div class="lab">HEIGHT</div>
     <label class="fld"><input id="hgt" type="number" min="120" max="220" value="${profile.height}" inputmode="numeric"> cm</label>
     <div class="lab">ORDERS</div><div id="ordList"></div>
@@ -1210,6 +1350,7 @@ function renderProfile() {
     profile.size = b.dataset.s; persist(); renderDrawer(); updateFitCopy(); sync();
   });
   $('#toFace').addEventListener('click', () => { drawerView = 'face'; renderDrawer(); });
+  $('#toAvatar').addEventListener('click', () => { drawerView = 'avatar'; renderDrawer(); });
   $('#hgt').addEventListener('change', e => { profile.height = clamp(+e.target.value || 165, 120, 220); e.target.value = profile.height; persist(); updateFitCopy(); });
   const ol = $('#ordList');
   ol.innerHTML = orders.length ? orders.map(o => `<div class="ord"><div><b>${o.id}</b><small>${new Date(o.date).toLocaleDateString()} · ${o.items.reduce((s, i) => s + i.q, 0)} items</small></div><span class="pr">${money(o.total)}</span></div>`).join('')
@@ -1232,6 +1373,9 @@ function setMode(m) {
   const b = document.querySelector(`.mb[data-m="${m}"]`);
   ind.style.width = b.offsetWidth + 'px'; ind.style.transform = `translateX(${b.offsetLeft}px)`;
   stage.classList.toggle('ar', m === 'ar');
+  stage.classList.toggle('me', m === 'me');
+  if (m === 'me') ensureAvatar();
+  if (avatar) avatar.setActive(m === 'me');
   const scan = stage.querySelector('.scan');
   scan.classList.remove('go'); void scan.offsetWidth;
   if (m === 'ar') scan.classList.add('go');
@@ -1269,6 +1413,7 @@ updateBagCount();
 updateFitCopy();
 updateFaceBtn();
 $('#faceBtn').addEventListener('click', () => openDrawer('face'));
+$('#meBar').addEventListener('click', () => openDrawer('avatar'));
 if (bag.length) $('#badge').classList.add('on');
 
 /* offline support for the installed web app (the Android app serves files itself) */

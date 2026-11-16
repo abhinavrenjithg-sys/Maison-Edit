@@ -1,7 +1,7 @@
 /* Maison Edit service worker: app shell offline, product photos cached after first view. */
-const SHELL = 'me-shell-v1';
-const MEDIA = 'me-media-v1';
-const SHELL_FILES = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
+const SHELL = 'me-shell-v2';
+const MEDIA = 'me-media-v2';
+const SHELL_FILES = ['./', 'index.html', 'avatar.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(SHELL).then(c => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
@@ -30,8 +30,8 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Photos and fonts: cache first, they never change.
-  if (/images\.higgs\.ai|cloudfront\.net|fonts\.(googleapis|gstatic)\.com/.test(url.hostname)) {
+  // Photos, fonts and the 3D library: cache first, they never change.
+  if (/images\.higgs\.ai|cloudfront\.net|fonts\.(googleapis|gstatic)\.com|cdn\.jsdelivr\.net/.test(url.hostname)) {
     e.respondWith(
       caches.open(MEDIA).then(c => c.match(req).then(hit => hit || fetch(req).then(res => {
         if (res.ok || res.type === 'opaque') c.put(req, res.clone());
