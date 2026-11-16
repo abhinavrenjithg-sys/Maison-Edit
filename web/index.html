@@ -245,8 +245,21 @@ svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stro
 #body{transition:opacity .45s}
 #stage.me #me3d{opacity:1;pointer-events:auto}
 #stage.me #body{opacity:0;pointer-events:none}
-#meBar{position:absolute;left:50%;bottom:calc(var(--H)*.02);transform:translate(-50%,12px);z-index:6;display:flex;align-items:center;gap:6px;background:#fbfaf8;box-shadow:var(--soft);border-radius:18px;padding:7px 14px;font-weight:500;opacity:0;pointer-events:none;transition:opacity .35s,transform .35s var(--ease)}
+#meBar{position:absolute;left:50%;bottom:calc(var(--H)*.02);transform:translate(-50%,12px);z-index:6;display:flex;gap:8px;opacity:0;pointer-events:none;transition:opacity .35s,transform .35s var(--ease);white-space:nowrap}
+#meBar button{display:flex;align-items:center;gap:6px;background:#fbfaf8;box-shadow:var(--soft);border-radius:18px;padding:7px 14px;font-weight:500}
+#meBar button.dark{background:var(--ink);color:#fff}
 #meBar svg.i{width:15px;height:15px}
+.ai-ph{position:relative;border-radius:12px;overflow:hidden;background:var(--tile);aspect-ratio:3/4;display:grid;place-items:center;margin:8px 0 12px}
+.ai-ph img{width:100%;height:100%;object-fit:cover;display:block}
+.ai-ph.contain img{object-fit:contain;background:#f4f2ee}
+.ai-ph .hint{color:var(--mute);text-align:center;padding:20px;line-height:1.5}
+.ai-items{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0 14px}
+.ai-items .th{aspect-ratio:523/450;border-radius:6px}
+.ai-wait{position:absolute;inset:0;display:grid;place-items:center;background:rgba(239,237,233,.82);backdrop-filter:blur(2px);text-align:center;color:var(--ink-2);font-weight:500}
+.ai-wait .sp{width:34px;height:34px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--ink);animation:spin 1s linear infinite;margin:0 auto 12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.srv{width:100%;height:40px;border-radius:8px;border:1px solid var(--line);background:#fff;padding:0 12px;font:inherit;margin:8px 0}
+.ai-err{background:#f8e9e9;color:#7a1f2e;border-radius:8px;padding:10px 12px;margin:6px 0 10px;line-height:1.45}
 #stage.me #meBar{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
 .sws{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 18px}
 .sw{width:34px;height:34px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12);position:relative;display:grid;place-items:center;font-size:9px;font-weight:600;color:var(--ink-2)}
@@ -360,7 +373,7 @@ svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stro
     </div>
     <div id="strip"></div>
     <div id="mode"><span class="ind"></span><button class="mb on" data-m="3d">3D</button><button class="mb" data-m="ar">AR</button><button class="mb" data-m="me">You</button></div>
-    <button id="meBar"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 21c.8-4.6 3.6-7 7-7s6.2 2.4 7 7"/></svg>Edit my avatar</button>
+    <div id="meBar"><button id="meEdit"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="7.5" r="3.5"/><path d="M5 21c.8-4.6 3.6-7 7-7s6.2 2.4 7 7"/></svg>Edit avatar</button><button id="meReal" class="dark"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Make it real · AI</button></div>
   </section>
 
   <section id="right">
@@ -882,7 +895,7 @@ function openDrawer(view) {
   if (!drawerView) lastFocus = document.activeElement;
   drawerView = view; renderDrawer();
   drawer.classList.add('on'); scrim.classList.add('on');
-  setTB(view === 'outfits' ? 'outfits' : view === 'profile' || view === 'face' || view === 'avatar' ? 'profile' : F.saved ? 'saved' : 'explore');
+  setTB(view === 'outfits' ? 'outfits' : view === 'profile' || view === 'face' || view === 'avatar' || view === 'real' ? 'profile' : F.saved ? 'saved' : 'explore');
   $('#dClose').focus();
 }
 function closeDrawer() {
@@ -908,6 +921,7 @@ function renderDrawer() {
   if (v === 'profile') return renderProfile();
   if (v === 'face') return renderFace();
   if (v === 'avatar') return renderAvatarSettings();
+  if (v === 'real') return renderReal();
 }
 
 /* ---------- face editor ---------- */
@@ -1220,6 +1234,95 @@ function renderAvatarSettings() {
   $('#avSee').addEventListener('click', () => { closeDrawer(); setMode('me'); });
 }
 
+/* ---------- AI try-on: a realistic photo of the shopper in this look (Gemini, via our server) ---------- */
+const IN_APP = location.hostname === 'appassets.androidplatform.net';
+const apiBase = () => IN_APP ? String(profile.server || '').trim().replace(/\/+$/, '') : '';
+let aiState = { busy: false, result: null, error: null };
+let sheetHi = null;
+function productImage(key) {
+  // the product's own photo, cut from the full-size product sheet
+  sheetHi = sheetHi || load(SHEET.replace('&w=1000', '&w=1744'));
+  return sheetHi.then(img => {
+    if (!img) throw new Error('Product photos could not be loaded. Check your internet connection.');
+    const k = img.width / 1744, p = P[key], TX = [44, 610, 1177][p.c], TY = [42, 611, 1180, 1749][p.r];
+    const c = document.createElement('canvas'); c.width = Math.round(523 * k); c.height = Math.round(537 * k);
+    c.getContext('2d').drawImage(img, TX * k, TY * k, 523 * k, 537 * k, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', .9);
+  });
+}
+function loadBodyPhoto(file) {
+  if (!file || !/^image\//.test(file.type)) { toast('Please choose a photo'); return; }
+  const url = URL.createObjectURL(file), i = new Image();
+  i.onload = () => {
+    const k = Math.min(1, 1024 / Math.max(i.width, i.height));
+    const c = document.createElement('canvas'); c.width = Math.round(i.width * k); c.height = Math.round(i.height * k);
+    const x = c.getContext('2d');
+    x.fillStyle = '#f2f0ec'; x.fillRect(0, 0, c.width, c.height); // transparent photos would turn black
+    x.drawImage(i, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(url);
+    profile.body = c.toDataURL('image/jpeg', .88);
+    aiState = { busy: false, result: null, error: null };
+    persist(); renderDrawer();
+  };
+  i.onerror = () => { URL.revokeObjectURL(url); toast('That photo could not be opened'); };
+  i.src = url;
+}
+async function generateLook() {
+  if (aiState.busy || !profile.body) return;
+  if (IN_APP && !apiBase()) {
+    aiState.error = 'Enter the address of the computer running the Maison Edit server, for example http://192.168.1.5:5173.';
+    renderDrawer(); return;
+  }
+  aiState = { busy: true, result: aiState.result, error: null };
+  renderDrawer();
+  const msgs = ['Dressing you…', 'Matching the fabrics…', 'Adjusting the fit…', 'Setting the lights…'];
+  let mi = 0;
+  const iv = setInterval(() => { const m = $('#aiMsg'); if (m) m.textContent = msgs[++mi % msgs.length]; }, 3500);
+  try {
+    const keys = ORDER.map(c => look[c]);
+    const images = await Promise.all(keys.map(productImage));
+    const res = await fetch(apiBase() + '/api/tryon', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ person: profile.body, items: keys.map((k, i) => ({ c: k[0], name: `${STORES[P[k].s]} ${P[k].n}`, image: images[i] })) })
+    });
+    const j = await res.json().catch(() => ({}));
+    if (res.status === 404 && !j.error) throw new Error('The AI server is not running on this site. Start it with: node serve.mjs');
+    if (!res.ok || !j.image) throw new Error(j.error || 'Could not create the image. Try again.');
+    aiState.result = j.image;
+    toast('Your look is ready');
+  } catch (e) {
+    aiState.error = /fetch|network|load failed/i.test(e.message) ? 'Could not reach the AI server. Check that it is running and the address is right.' : e.message;
+  } finally {
+    clearInterval(iv); aiState.busy = false;
+    if (drawerView === 'real') renderDrawer();
+  }
+}
+function renderReal() {
+  $('#dTitle').textContent = 'See it on me · AI';
+  const b = profile.body, r = aiState, done = r.result && !r.busy;
+  const pickers = '<input type="file" accept="image/*" capture="environment" id="bdCam" hidden><input type="file" accept="image/*" id="bdFile" hidden>';
+  const ph = done ? `<img src="${r.result}" alt="You wearing the selected look">`
+    : b ? `<img src="${b}" alt="Your photo">`
+    : '<div class="hint">Use a full-body photo: head to feet in the frame, facing the camera, in good light.</div>';
+  dBody.innerHTML = `${pickers}
+    <p class="note">AI creates a realistic photo of you wearing this look.</p>
+    <div class="ai-ph${done ? ' contain' : ''}">${ph}${r.busy ? '<div class="ai-wait"><div><div class="sp"></div><span id="aiMsg">Dressing you…</span><br><small class="note">Usually 10–40 seconds</small></div></div>' : ''}</div>
+    ${r.error ? `<div class="ai-err">${esc(r.error)}</div>` : ''}
+    ${b ? `<div class="fe-links">${done ? `<a class="lk" download="maison-edit-look.png" href="${r.result}">Save image</a><button class="lk" id="aiOrig">Back to my photo</button>` : ''}<button class="lk" data-pick="bdCam">New photo</button><button class="lk" data-pick="bdFile">Upload another</button></div>` : ''}
+    <div class="lab" style="margin-top:12px">THIS LOOK</div><div class="ai-items">${thumbs(look)}</div>
+    ${IN_APP ? `<div class="lab">AI SERVER</div><input id="aiServer" class="srv" placeholder="http://192.168.1.5:5173" value="${esc(profile.server || '')}" inputmode="url" autocomplete="off">` : ''}
+    <p class="note" style="margin-top:10px">Your photo and the product photos are sent to Google Gemini to make the image. Your photo is kept only on this device.</p>`;
+  paintThumbs(dBody);
+  dFoot.innerHTML = b
+    ? `<button class="btn" id="aiGo" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Working…' : r.result ? 'Generate again' : 'Generate my look'}</button>`
+    : '<button class="btn" data-pick="bdCam">Take a full-body photo</button><button class="btn ghost" data-pick="bdFile">Upload a photo</button>';
+  drawer.querySelectorAll('[data-pick]').forEach(btn => btn.addEventListener('click', () => $('#' + btn.dataset.pick).click()));
+  ['#bdCam', '#bdFile'].forEach(s => $(s).addEventListener('change', e => { loadBodyPhoto(e.target.files[0]); e.target.value = ''; }));
+  $('#aiGo')?.addEventListener('click', generateLook);
+  $('#aiOrig')?.addEventListener('click', () => { aiState.result = null; renderDrawer(); });
+  $('#aiServer')?.addEventListener('change', e => { profile.server = e.target.value.trim(); persist(); });
+}
+
 function renderBag() {
   $('#dTitle').textContent = 'Your bag';
   if (!bag.length) {
@@ -1338,7 +1441,8 @@ function renderProfile() {
     <div class="seg" id="sizes">${sizes.map(s => `<button class="${s === profile.size ? 'on' : ''}" data-s="${s}">${s}</button>`).join('')}</div>
     <div class="lab">YOUR MODEL</div>
     <button class="btn ghost" id="toFace" style="margin:8px 0 8px">${profile.face && profile.face.src ? 'Edit my face on the model' : 'Put my face on the model'}</button>
-    <button class="btn ghost" id="toAvatar" style="margin:0 0 18px">Build my 3D avatar</button>
+    <button class="btn ghost" id="toAvatar" style="margin:0 0 8px">Build my 3D avatar</button>
+    <button class="btn" id="toReal" style="margin:0 0 18px">See the outfit on my photo · AI</button>
     <div class="lab">HEIGHT</div>
     <label class="fld"><input id="hgt" type="number" min="120" max="220" value="${profile.height}" inputmode="numeric"> cm</label>
     <div class="lab">ORDERS</div><div id="ordList"></div>
@@ -1351,6 +1455,7 @@ function renderProfile() {
   });
   $('#toFace').addEventListener('click', () => { drawerView = 'face'; renderDrawer(); });
   $('#toAvatar').addEventListener('click', () => { drawerView = 'avatar'; renderDrawer(); });
+  $('#toReal').addEventListener('click', () => { drawerView = 'real'; renderDrawer(); });
   $('#hgt').addEventListener('change', e => { profile.height = clamp(+e.target.value || 165, 120, 220); e.target.value = profile.height; persist(); updateFitCopy(); });
   const ol = $('#ordList');
   ol.innerHTML = orders.length ? orders.map(o => `<div class="ord"><div><b>${o.id}</b><small>${new Date(o.date).toLocaleDateString()} · ${o.items.reduce((s, i) => s + i.q, 0)} items</small></div><span class="pr">${money(o.total)}</span></div>`).join('')
@@ -1413,7 +1518,8 @@ updateBagCount();
 updateFitCopy();
 updateFaceBtn();
 $('#faceBtn').addEventListener('click', () => openDrawer('face'));
-$('#meBar').addEventListener('click', () => openDrawer('avatar'));
+$('#meEdit').addEventListener('click', () => openDrawer('avatar'));
+$('#meReal').addEventListener('click', () => openDrawer('real'));
 if (bag.length) $('#badge').classList.add('on');
 
 /* offline support for the installed web app (the Android app serves files itself) */

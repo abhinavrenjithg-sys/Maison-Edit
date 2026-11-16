@@ -21,6 +21,7 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
 
   // The page itself: network first so updates show up, cache when offline.
+  if (url.origin === location.origin && url.pathname.startsWith('/api/')) return; // never cache the AI server
   if (url.origin === location.origin) {
     e.respondWith(
       fetch(req)

@@ -2,8 +2,11 @@ package app.maisonedit
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
+import android.webkit.ValueCallback
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowInsets
@@ -24,6 +27,22 @@ import androidx.webkit.WebViewAssetLoader
 class MainActivity : Activity() {
 
     private lateinit var web: WebView
+    private var fileCallback: ValueCallback<Array<Uri>>? = null
+
+    companion object {
+        private const val PICK_FILE = 41
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == PICK_FILE) {
+            fileCallback?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data))
+            fileCallback = null
+            return
+        }
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+    }
 
     private val host = "appassets.androidplatform.net"
 
@@ -44,8 +63,25 @@ class MainActivity : Activity() {
             settings.allowContentAccess = false
             settings.mediaPlaybackRequiresUserGesture = true
             overScrollMode = WebView.OVER_SCROLL_NEVER
-            // Lets the page show its own confirm() dialogs (e.g. "Clear all saved data").
-            webChromeClient = WebChromeClient()
+            // Shows the page's confirm() dialogs and opens the phone's photo picker / camera
+            // for the "Your face" and "See it on me" photo buttons.
+            webChromeClient = object : WebChromeClient() {
+                override fun onShowFileChooser(
+                    view: WebView,
+                    callback: ValueCallback<Array<Uri>>,
+                    params: FileChooserParams
+                ): Boolean {
+                    fileCallback?.onReceiveValue(null)
+                    fileCallback = callback
+                    return try {
+                        startActivityForResult(params.createIntent(), PICK_FILE)
+                        true
+                    } catch (e: ActivityNotFoundException) {
+                        fileCallback = null
+                        false
+                    }
+                }
+            }
 
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =

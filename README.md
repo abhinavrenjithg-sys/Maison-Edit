@@ -23,6 +23,16 @@ serve.mjs            small local web server, no dependencies
 - Saved pieces, bag, outfits, orders and the current look are kept on the device between visits
 - Phone layout with a fixed top bar and bottom tab bar; Android back button closes open panels first
 
+## AI try-on ("See it on me")
+
+Upload a full-body photo and Gemini creates a realistic photo of you wearing the selected look.
+
+1. Copy `.env.example` to `.env` and put your key in `GEMINI_API_KEY` (from https://aistudio.google.com/apikey).
+2. Image generation is a paid Gemini feature: turn on billing for the key's project in Google AI Studio.
+3. Run `node serve.mjs`. The key stays on the server; it is never sent to the browser, and `.env` is not committed.
+
+In the Android app, open *Profile → See the outfit on my photo* and enter the server address shown on the computer running `serve.mjs` (for example `http://192.168.1.5:5173`, same Wi-Fi).
+
 ## Run the website
 
 ```bash
