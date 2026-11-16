@@ -25,6 +25,7 @@ const KEY = process.env.GEMINI_API_KEY || '';
 const MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
 // "free" = OOTDiffusion on Hugging Face (top + skirt, optional free HF_TOKEN); "gemini" = paid, whole outfit
 const PROVIDER = (process.env.AI_PROVIDER || 'free').toLowerCase();
+const API = (process.env.GEMINI_API_BASE || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '');
 const MAX_BODY = 20 * 1024 * 1024;
 
 const TYPES = {
@@ -61,17 +62,37 @@ function splitDataUrl(u) {
 }
 
 const CAT = { t: 'top', k: 'skirt', s: 'shoes', g: 'bag' };
-function prompt(items, extra) {
-  const list = items.map((it, i) => `Image ${i + 2}: the ${CAT[it.c] || 'item'} — ${it.name}.`).join('\n');
-  return `You are a virtual fitting room for a fashion store.
-Image 1 is a photo of the customer.
+const RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+function nearestRatio(w, h) {
+  if (!(w > 0 && h > 0)) return null;
+  const r = w / h;
+  return RATIOS.reduce((best, x) => { const [a, b] = x.split(':').map(Number); return Math.abs(Math.log(a / b / r)) < Math.abs(Math.log(best[1])) ? [x, a / b / r] : best; }, ['', Infinity])[0];
+}
+function prompt(items, { hasFace, extra }) {
+  const first = hasFace ? 3 : 2;
+  const list = items.map((it, i) => `Image ${i + first}: the ${CAT[it.c] || 'item'} — ${it.name}.`).join('\n');
+  return `You are a virtual fitting room for a fashion store. This is a photo edit, not a new photo: change only the clothes.
+
+Image 1 is a photo of the customer.${hasFace ? '\nImage 2 is a close-up of the same customer\'s face, for reference only. Use it to keep the face exact.' : ''}
 ${list}
 
-Create one realistic, high quality full-body photo of the SAME person from image 1 wearing exactly these ${items.length} products, replacing the matching clothes they have on.
-Keep the person's face, identity, skin tone, hair, body shape and pose unchanged.
-Copy each product faithfully: same colour, material, pattern, length and details as its product photo. Clothes must fit naturally with realistic folds, shadows and lighting.
-Show the whole body from head to feet, in a clean, softly lit studio with a light warm grey background.
-${extra ? 'Extra request: ' + String(extra).slice(0, 300) : ''}
+Edit image 1 so the SAME person is wearing exactly these ${items.length} products, replacing the matching clothes they have on.
+
+IDENTITY — strict, the most important rule:
+- The face must be the customer's own face, recognisably the same person as image 1: same eyes, nose, lips, jawline, face shape, skin tone, freckles, marks and expression.
+- Keep the same hairstyle, hairline, hair colour and any facial hair.
+- Do not beautify, retouch, smooth, slim, reshape or regenerate the face. Do not replace the person with a model.
+
+BODY — keep it real:
+- Keep their actual body shape, height proportions, shoulders, waist, hips and build. Do not slim, enlarge or idealise the body.
+- Keep the same pose, camera angle, framing and background as image 1. Fit the clothes to this pose and these proportions.
+
+CLOTHES — copy faithfully:
+- Copy each product exactly from its product photo: colour, fabric, pattern, print, buttons, collar, neckline, sleeves, length, hem and other details. Do not invent new details.
+- Clothes must fit naturally on this body with realistic folds, shadows and lighting that match the scene.
+
+The result should look like the customer took this photo while wearing the outfit.
+${extra ? 'Extra request (never overrides the rules above): ' + String(extra).slice(0, 300) : ''}
 Return only the image.`;
 }
 
@@ -89,6 +110,21 @@ async function tryOnWithFree(req, res) {
   }
 }
 
+async function callGemini(parts, aspect) {
+  const cfg = { responseModalities: ['TEXT', 'IMAGE'] };
+  if (aspect) cfg.imageConfig = { aspectRatio: aspect };
+  const r = await fetch(`${API}/v1beta/models/${encodeURIComponent(MODEL)}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': KEY },
+    body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: cfg }),
+    signal: AbortSignal.timeout(120000)
+  });
+  const j = await r.json().catch(() => ({}));
+  // older image models do not take imageConfig: try once more without it
+  if (r.status === 400 && aspect && /imageConfig|aspect/i.test((j.error && j.error.message) || '')) return callGemini(parts, null);
+  return { r, j };
+}
+
 async function tryOn(req, res) {
   if (PROVIDER !== 'gemini') return tryOnWithFree(req, res);
   if (!KEY) return sendJSON(res, 503, { error: 'The AI try-on is not set up: add GEMINI_API_KEY to the .env file and restart the server.' });
@@ -100,15 +136,12 @@ async function tryOn(req, res) {
   if (!person) return sendJSON(res, 400, { error: 'Add a photo of yourself first.' });
   if (!items.length) return sendJSON(res, 400, { error: 'No products were sent.' });
 
-  const parts = [{ text: prompt(items, body.extra) }, { inline_data: person }, ...items.map(it => ({ inline_data: it.img }))];
+  const face = splitDataUrl(body.face);
+  const aspect = nearestRatio(+body.width, +body.height);
+  const parts = [{ text: prompt(items, { hasFace: !!face, extra: body.extra }) }, { inline_data: person },
+    ...(face ? [{ inline_data: face }] : []), ...items.map(it => ({ inline_data: it.img }))];
   try {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(MODEL)}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': KEY },
-      body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } }),
-      signal: AbortSignal.timeout(120000)
-    });
-    const j = await r.json().catch(() => ({}));
+    const { r, j } = await callGemini(parts, aspect);
     if (!r.ok) {
       console.error('Gemini error', r.status, j.error && j.error.message);
       const text = (j.error && j.error.message) || '';
