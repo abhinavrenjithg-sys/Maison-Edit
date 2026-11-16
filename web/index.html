@@ -238,6 +238,18 @@ svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stro
 .form input{height:42px;border-radius:8px;border:1px solid var(--line);background:#fff;padding:0 12px;font:inherit}
 .form input:focus{outline:0;border-color:var(--ink)}
 .note{color:var(--mute);font-size:.9em;line-height:1.5}
+.fe-hero{display:flex;justify-content:center;padding:28px 0 18px}
+.fe-oval{width:120px;height:156px;border-radius:50%;border:1.5px dashed #c9c4bc;display:grid;place-items:center;color:var(--mute)}
+.fe-oval svg.i{width:56px;height:56px;stroke-width:1.2}
+.fe-wrap{padding:6px 0 10px}
+.fe-stage{width:184px;height:240px;margin:6px auto 8px;border-radius:50%;overflow:hidden;cursor:grab;touch-action:none;box-shadow:0 0 0 3px #fff,0 0 0 4.5px var(--line);background:var(--tile)}
+.fe-stage:active{cursor:grabbing}
+.fe-stage canvas{width:100%;height:100%;display:block;pointer-events:none}
+.fe-r{display:grid;grid-template-columns:120px 1fr;align-items:center;gap:10px;margin:8px 0;color:var(--ink-2)}
+.fe-r input{width:100%;accent-color:var(--ink)}
+.fe-tog{display:flex;align-items:center;gap:8px;margin:16px 0 6px;font-weight:500}
+.fe-tog input{width:16px;height:16px;accent-color:var(--ink)}
+.fe-links{display:flex;gap:16px;flex-wrap:wrap;margin:10px 0 6px}
 
 @media (max-width:1100px){#app{padding:0 3vw}}
 @media (max-width:860px){
@@ -327,6 +339,7 @@ svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stro
       <button class="rb" data-rc="k"><svg class="i" viewBox="0 0 24 24"><path d="M8 4h8l3.5 15h-15z"/><path d="M7.4 7h9.2M10 7l-1 12M14 7l1 12"/></svg></button>
       <button class="rb" data-rc="s"><svg class="i" viewBox="0 0 24 24"><path d="M9 3h5v10l5 2.4a2 2 0 0 1 1.2 1.8V20H9z"/><path d="M9 17h11"/></svg></button>
       <button class="rb" data-rc="g"><svg class="i" viewBox="0 0 24 24"><path d="M5 9h14l-1 11H6z"/><path d="M9 9V7a3 3 0 0 1 6 0v2"/></svg></button>
+      <button class="rb" id="faceBtn" data-tip="Your face on the model"><svg class="i" viewBox="0 0 24 24"><ellipse cx="12" cy="11" rx="6.5" ry="8"/><path d="M9.5 10h.01M14.5 10h.01M9.8 14.2c1.3 1 3.1 1 4.4 0"/></svg></button>
       <button class="rb" id="ai" data-tip="AI stylist · surprise me"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></svg></button>
     </div>
     <div id="strip"></div>
@@ -505,6 +518,41 @@ function draw(ctx, L) {
     ctx.drawImage(off, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
   }
+  if (faceImg && profile.face && profile.face.on) drawFace(ctx);
+}
+
+/* ---------- your face on the model ---------- */
+// Head oval on the 1000×1506 model canvas; the user can nudge and resize it in the editor.
+const FACE = { cx: 498, cy: 158, rx: 46, ry: 60 };
+const FW = 230, FH = 300; // face crop size, same 46:60 shape as the oval
+let faceImg = null;
+const fcv = document.createElement('canvas'), fcx = fcv.getContext('2d');
+function faceBox() {
+  const f = profile.face, rx = FACE.rx * f.sc, ry = FACE.ry * f.sc;
+  return { cx: FACE.cx + f.dx, cy: FACE.cy + f.dy, rx, ry };
+}
+function drawFace(ctx) {
+  const { cx, cy, rx, ry } = faceBox();
+  const w = Math.ceil(rx * 2), h = Math.ceil(ry * 2);
+  fcv.width = w; fcv.height = h;
+  fcx.globalCompositeOperation = 'source-over';
+  fcx.drawImage(faceImg, 0, 0, w, h);
+  // feathered oval so the edge melts into the model's hair and neck
+  fcx.globalCompositeOperation = 'destination-in';
+  fcx.save(); fcx.translate(w / 2, h / 2); fcx.scale(1, ry / rx);
+  const g = fcx.createRadialGradient(0, 0, 0, 0, 0, rx);
+  const soft = profile.face.soft ?? .3;
+  g.addColorStop(0, '#000'); g.addColorStop(1 - soft, '#000'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  fcx.fillStyle = g; fcx.fillRect(-rx, -rx, rx * 2, rx * 2);
+  fcx.restore();
+  fcx.globalCompositeOperation = 'source-over';
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(fcv, cx - rx, cy - ry, w, h);
+}
+function redrawModel() {
+  if (!ready) return;
+  if (anim) { cancelAnimationFrame(anim); anim = null; cNew.style.clipPath = 'none'; cOld.style.clipPath = 'none'; glint.style.opacity = 0; }
+  draw(xOld, look); draw(xNew, look); drawn = { ...look };
 }
 
 let anim = null, drawn = { ...look }, ready = false;
@@ -815,7 +863,7 @@ function openDrawer(view) {
   if (!drawerView) lastFocus = document.activeElement;
   drawerView = view; renderDrawer();
   drawer.classList.add('on'); scrim.classList.add('on');
-  setTB(view === 'outfits' ? 'outfits' : view === 'profile' ? 'profile' : F.saved ? 'saved' : 'explore');
+  setTB(view === 'outfits' ? 'outfits' : view === 'profile' || view === 'face' ? 'profile' : F.saved ? 'saved' : 'explore');
   $('#dClose').focus();
 }
 function closeDrawer() {
@@ -839,6 +887,198 @@ function renderDrawer() {
   if (v === 'done') return renderDone();
   if (v === 'outfits') return renderOutfits();
   if (v === 'profile') return renderProfile();
+  if (v === 'face') return renderFace();
+}
+
+/* ---------- face editor ---------- */
+let ed = null; // { img, x, y, s } while editing: the photo's position inside the oval
+const clampN = (v, a, b, d) => Number.isFinite(+v) ? clamp(+v, a, b) : d;
+function faceDefaults() {
+  return { on: true, dx: 0, dy: 0, sc: 1, soft: .3, bright: 0, warm: 0, match: 60, raw: null, src: null, x: 0, y: 0, s: 1 };
+}
+function modelSkin() {
+  // average colour of the model's own face, used to match the user's skin tone
+  if (modelSkin.v !== undefined) return modelSkin.v;
+  try {
+    const c = document.createElement('canvas'); c.width = 40; c.height = 40;
+    const x = c.getContext('2d');
+    x.drawImage(IM.base, FACE.cx - FACE.rx * .45, FACE.cy - FACE.ry * .2, FACE.rx * .9, FACE.ry * .55, 0, 0, 40, 40);
+    modelSkin.v = meanRGB(x.getImageData(0, 0, 40, 40).data);
+  } catch { modelSkin.v = null; }
+  return modelSkin.v;
+}
+function meanRGB(d) {
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < d.length; i += 4) { if (d[i + 3] < 200) continue; r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+  return n ? [r / n, g / n, b / n] : null;
+}
+const bake = document.createElement('canvas'); bake.width = FW; bake.height = FH;
+const bx = bake.getContext('2d', { willReadFrequently: true });
+function bakeFace() {
+  // draws the positioned photo into the oval crop and applies brightness, warmth and skin match
+  const f = profile.face;
+  bx.clearRect(0, 0, FW, FH); // where the photo does not reach, the model's own face shows
+  bx.drawImage(ed.img, ed.x, ed.y, ed.img.width * ed.s, ed.img.height * ed.s);
+  const id = bx.getImageData(0, 0, FW, FH), d = id.data;
+  let mul = [1, 1, 1];
+  const ms = IM.base && modelSkin();
+  if (ms && f.match > 0) {
+    const cx = FW * .3, cy = FH * .35, cw = FW * .4, ch = FH * .35;
+    const us = meanRGB(bx.getImageData(cx, cy, cw, ch).data);
+    if (us) mul = ms.map((m, i) => 1 + (clamp(m / Math.max(us[i], 1), .6, 1.6) - 1) * f.match / 100);
+  }
+  const br = f.bright * 1.6, wm = f.warm * .8;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = d[i] * mul[0] + br + wm;
+    d[i + 1] = d[i + 1] * mul[1] + br;
+    d[i + 2] = d[i + 2] * mul[2] + br - wm;
+  }
+  bx.putImageData(id, 0, 0);
+}
+function applyFace(save) {
+  if (!ed) return;
+  bakeFace();
+  const src = bake.toDataURL('image/webp', .9); // keeps transparency; browsers without WebP give PNG
+  const i = new Image();
+  i.onload = () => { faceImg = i; redrawModel(); };
+  i.src = src;
+  if (save) {
+    Object.assign(profile.face, { src, x: ed.x, y: ed.y, s: ed.s });
+    persist(); updateFaceBtn();
+  }
+  const pv = $('#fePrev');
+  if (pv) pv.getContext('2d').drawImage(bake, 0, 0, pv.width, pv.height);
+}
+function loadFacePhoto(file) {
+  if (!file || !/^image\//.test(file.type)) { toast('Please choose a photo'); return; }
+  const url = URL.createObjectURL(file);
+  const i = new Image();
+  i.onload = async () => {
+    // keep a smaller copy (max 720 px) so it fits in the device storage
+    const k = Math.min(1, 720 / Math.max(i.width, i.height));
+    const c = document.createElement('canvas'); c.width = Math.round(i.width * k); c.height = Math.round(i.height * k);
+    c.getContext('2d').drawImage(i, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(url);
+    const raw = c.toDataURL('image/jpeg', .85);
+    const img = new Image();
+    img.onload = async () => {
+      profile.face = Object.assign(profile.face || faceDefaults(), { raw, on: true });
+      ed = { img, ...(await autoFit(img)) };
+      applyFace(true); renderDrawer();
+      toast('Drag the photo so your face fills the oval');
+    };
+    img.src = raw;
+  };
+  i.onerror = () => { URL.revokeObjectURL(url); toast('That photo could not be opened'); };
+  i.src = url;
+}
+async function autoFit(img) {
+  // Chrome on Android can find the face for us; otherwise centre the upper part of the photo.
+  if ('FaceDetector' in window) {
+    try {
+      const [f] = await new FaceDetector({ maxDetectedFaces: 1, fastMode: true }).detect(img);
+      if (f) {
+        const b = f.boundingBox, s = FW * .92 / b.width;
+        return { s, x: FW / 2 - (b.x + b.width / 2) * s, y: FH * .54 - (b.y + b.height / 2) * s };
+      }
+    } catch { /* not supported here */ }
+  }
+  const s = Math.max(FW / img.width, FH / img.height) * 1.9;
+  return { s, x: (FW - img.width * s) / 2, y: (FH - img.height * s) * .3 };
+}
+
+function renderFace() {
+  $('#dTitle').textContent = 'Your face';
+  const f = profile.face;
+  const pick = `<input type="file" accept="image/*" capture="user" id="feCam" hidden><input type="file" accept="image/*" id="feFile" hidden>`;
+  if (!f || !f.raw) {
+    dBody.innerHTML = `${pick}<div class="fe-hero"><div class="fe-oval"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="9" r="4.5"/><path d="M4 21c1.2-4.2 4.4-6.3 8-6.3s6.8 2.1 8 6.3"/></svg></div></div>
+      <p style="text-align:center;font-weight:500;margin-bottom:6px">Try the clothes with your own face</p>
+      <p class="note" style="text-align:center">Use a front-facing photo with good light and your hair away from your face.</p>
+      <p class="note" style="text-align:center;margin-top:14px">Your photo stays on this device. It is never uploaded.</p>`;
+    dFoot.innerHTML = `<button class="btn" id="feCamBtn">Take a selfie</button><button class="btn ghost" id="feFileBtn">Upload a photo</button>`;
+  } else {
+    dBody.innerHTML = `${pick}
+      <div class="fe-wrap"><div class="fe-stage" id="feStage"><canvas id="fePrev" width="${FW}" height="${FH}"></canvas></div>
+      <p class="note" style="text-align:center">Drag to move · pinch or use the slider to zoom</p></div>
+      <div class="lab">PHOTO</div>
+      ${rng('s', 'Zoom', 10, 400, Math.round((ed ? ed.s : f.s) * 100))}
+      ${rng('bright', 'Brightness', -40, 40, f.bright)}
+      ${rng('warm', 'Warmth', -40, 40, f.warm)}
+      ${rng('match', 'Match model skin', 0, 100, f.match)}
+      <div class="lab" style="margin-top:14px">FIT ON MODEL</div>
+      ${rng('sc', 'Size', 75, 135, Math.round(f.sc * 100))}
+      ${rng('dx', 'Left · right', -30, 30, f.dx)}
+      ${rng('dy', 'Up · down', -30, 30, f.dy)}
+      ${rng('soft', 'Edge softness', 5, 60, Math.round(f.soft * 100))}
+      <label class="fe-tog"><input type="checkbox" id="feOn" ${f.on ? 'checked' : ''}> Show my face on the model</label>
+      <div class="fe-links"><button class="lk" id="feCamBtn">New selfie</button><button class="lk" id="feFileBtn">New photo</button><button class="lk" id="feDel">Remove my face</button></div>`;
+    dFoot.innerHTML = `<button class="btn" id="feDone">Done</button>`;
+    if (!ed) {
+      const img = new Image();
+      img.onload = () => { ed = { img, x: f.x, y: f.y, s: f.s }; applyFace(false); };
+      img.src = f.raw;
+    } else applyFace(false);
+    wireFaceEditor();
+  }
+  $('#feCamBtn').addEventListener('click', () => $('#feCam').click());
+  $('#feFileBtn').addEventListener('click', () => $('#feFile').click());
+  ['#feCam', '#feFile'].forEach(s => $(s).addEventListener('change', e => { loadFacePhoto(e.target.files[0]); e.target.value = ''; }));
+}
+function rng(key, label, min, max, val) {
+  return `<label class="fe-r"><span>${label}</span><input type="range" data-f="${key}" min="${min}" max="${max}" value="${val}"></label>`;
+}
+function wireFaceEditor() {
+  const f = profile.face, stage = $('#feStage');
+  let saveT;
+  const changed = () => { applyFace(false); clearTimeout(saveT); saveT = setTimeout(() => applyFace(true), 350); };
+  const zoomTo = (ns, px = FW / 2, py = FH / 2) => {
+    ns = clamp(ns, .1, 4);
+    ed.x = px - (px - ed.x) * ns / ed.s; ed.y = py - (py - ed.y) * ns / ed.s; ed.s = ns;
+    const zr = dBody.querySelector('[data-f="s"]'); if (zr) zr.value = Math.round(ns * 100);
+    changed();
+  };
+  dBody.querySelectorAll('input[type=range]').forEach(r => r.addEventListener('input', () => {
+    if (!ed) return;
+    const k = r.dataset.f, v = +r.value;
+    if (k === 's') return zoomTo(v / 100);
+    if (k === 'sc') f.sc = v / 100;
+    else if (k === 'soft') f.soft = v / 100;
+    else f[k] = v;
+    changed();
+  }));
+  // drag and pinch inside the oval
+  const pts = new Map(); let last = null;
+  const k = () => FW / stage.getBoundingClientRect().width;
+  stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); pts.set(e.pointerId, e); last = null; });
+  stage.addEventListener('pointermove', e => {
+    if (!ed || !pts.has(e.pointerId)) return;
+    const prev = pts.get(e.pointerId); pts.set(e.pointerId, e);
+    if (pts.size === 1) {
+      ed.x += (e.clientX - prev.clientX) * k(); ed.y += (e.clientY - prev.clientY) * k(); changed();
+    } else if (pts.size === 2) {
+      const [a, b] = [...pts.values()], dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      if (last) zoomTo(ed.s * dist / last);
+      last = dist;
+    }
+  });
+  const up = e => { pts.delete(e.pointerId); last = null; };
+  stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
+  stage.addEventListener('wheel', e => {
+    e.preventDefault(); if (!ed) return;
+    const r = stage.getBoundingClientRect();
+    zoomTo(ed.s * (e.deltaY < 0 ? 1.08 : 1 / 1.08), (e.clientX - r.left) * k(), (e.clientY - r.top) * k());
+  }, { passive: false });
+  $('#feOn').addEventListener('change', e => { f.on = e.target.checked; persist(); redrawModel(); updateFaceBtn(); });
+  $('#feDel').addEventListener('click', () => {
+    if (!confirm('Remove your face photo from this device?')) return;
+    profile.face = null; faceImg = null; ed = null; persist(); redrawModel(); updateFaceBtn(); renderDrawer();
+    toast('Face removed');
+  });
+  $('#feDone').addEventListener('click', () => { applyFace(true); closeDrawer(); toast('Your face is on the model'); });
+}
+function updateFaceBtn() {
+  $('#faceBtn').classList.toggle('on', !!(profile.face && profile.face.on && profile.face.src));
 }
 
 function renderBag() {
@@ -957,6 +1197,8 @@ function renderProfile() {
   const sizes = ['XS', 'S', 'M', 'L', 'XL'];
   dBody.innerHTML = `<div class="lab">YOUR SIZE</div>
     <div class="seg" id="sizes">${sizes.map(s => `<button class="${s === profile.size ? 'on' : ''}" data-s="${s}">${s}</button>`).join('')}</div>
+    <div class="lab">YOUR MODEL</div>
+    <button class="btn ghost" id="toFace" style="margin:8px 0 18px">${profile.face && profile.face.src ? 'Edit my face on the model' : 'Put my face on the model'}</button>
     <div class="lab">HEIGHT</div>
     <label class="fld"><input id="hgt" type="number" min="120" max="220" value="${profile.height}" inputmode="numeric"> cm</label>
     <div class="lab">ORDERS</div><div id="ordList"></div>
@@ -967,6 +1209,7 @@ function renderProfile() {
     const b = e.target.closest('[data-s]'); if (!b) return;
     profile.size = b.dataset.s; persist(); renderDrawer(); updateFitCopy(); sync();
   });
+  $('#toFace').addEventListener('click', () => { drawerView = 'face'; renderDrawer(); });
   $('#hgt').addEventListener('change', e => { profile.height = clamp(+e.target.value || 165, 120, 220); e.target.value = profile.height; persist(); updateFitCopy(); });
   const ol = $('#ordList');
   ol.innerHTML = orders.length ? orders.map(o => `<div class="ord"><div><b>${o.id}</b><small>${new Date(o.date).toLocaleDateString()} · ${o.items.reduce((s, i) => s + i.q, 0)} items</small></div><span class="pr">${money(o.total)}</span></div>`).join('')
@@ -1024,6 +1267,8 @@ setCat('all');
 sync();
 updateBagCount();
 updateFitCopy();
+updateFaceBtn();
+$('#faceBtn').addEventListener('click', () => openDrawer('face'));
 if (bag.length) $('#badge').classList.add('on');
 
 /* offline support for the installed web app (the Android app serves files itself) */
@@ -1036,7 +1281,8 @@ setMode('3d');
 
 Promise.all([
   ...Object.entries(MODEL).map(([k, f]) => load(H(f, 1000)).then(i => IM[k] = i)),
-  ...Object.entries(MASKS).map(([k, d]) => load(d).then(i => MK[k] = i))
+  ...Object.entries(MASKS).map(([k, d]) => load(d).then(i => MK[k] = i)),
+  profile.face && profile.face.src ? load(profile.face.src).then(i => faceImg = i) : null
 ]).then(() => {
   ready = true;
   draw(xOld, look); draw(xNew, look); drawn = { ...look };
