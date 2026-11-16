@@ -91,7 +91,13 @@ export async function tryOnFree({ person, items, frame = 'full' }, { token = pro
 /** Turns service errors into plain messages for shoppers. */
 export function friendlyFreeError(e) {
   const m = String(e && e.message || '');
-  if (/quota|exceeded|ZeroGPU|GPU duration|limit/i.test(m)) return 'The free AI has used up its GPU time for now. Try again later, or add a free Hugging Face token (HF_TOKEN) to the server for more.';
+  if (/quota|exceeded|ZeroGPU|GPU duration|limit/i.test(m)) {
+    const wait = /Try again in (\d+):(\d+):\d+/.exec(m);
+    const when = wait && (+wait[1] || +wait[2]) ? ` Try again in about ${+wait[1] ? wait[1] + ' h ' : ''}${+wait[2]} min.` : ' Try again in a little while.';
+    return process.env.HF_TOKEN
+      ? 'Today’s free AI time on Hugging Face is used up.' + when + ' (A Hugging Face PRO plan gives much more, or switch the server to Gemini.)'
+      : 'The free AI has used up its GPU time for now. Add a free Hugging Face token (HF_TOKEN) to the server for more.' + when;
+  }
   if (/queue|too many|429/i.test(m)) return 'The free AI is busy right now. Try again in a minute.';
   if (/timeout|aborted/i.test(m)) return 'The free AI took too long. Try again.';
   if (/sleep|503|502|504|call 5|upload 5/i.test(m)) return 'The free AI service is waking up or unavailable. Try again in a minute.';

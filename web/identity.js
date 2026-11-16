@@ -452,7 +452,10 @@ export async function checkAndRestore(person, genSrc, products = []) {
   // ----- the context around the face: hair, body proportions, pose (not touched by a face restore) -----
   const hairDE = orig.face && gen.face && orig.face.hair && gen.face.hair ? deltaE(orig.face.hair, gen.face.hair) : null;
   const po = proportions(orig.kp), pg = proportions(gen.kp);
-  const bodyKeys = Object.keys(po).filter(k => k in pg);
+  // Neck height (nose to shoulder line) moves when the neckline changes (off-shoulder ↔ covered shoulders shifts the
+  // detected shoulder points), so it is only a note, never a reason to reject. Shoulders, hips and legs stay strict.
+  const neckDiff = 'neck' in po && 'neck' in pg ? Math.abs(pg.neck - po.neck) / po.neck : null;
+  const bodyKeys = Object.keys(po).filter(k => k in pg && k !== 'neck');
   const bodyDiffs = bodyKeys.map(k => Math.abs(pg[k] - po[k]) / po[k]);
   const bodyWorst = bodyKeys.length >= 2 ? Math.max(...bodyDiffs) : null;
   const pd = poseDiff(orig.kp, gen.kp);
@@ -515,6 +518,8 @@ export async function checkAndRestore(person, genSrc, products = []) {
       bodyWorst <= LIMITS.bodyPass ? 'Proportions match your photo.' : `${names[wk][0].toUpperCase() + names[wk].slice(1)} changed by about ${Math.round(bodyWorst * 100)}%.`);
   } else add('body', 'Body shape', Object.keys(po).length >= 2 ? 'warn' : 'skip',
     Object.keys(po).length >= 2 ? 'Could not measure body proportions in the result.' : 'Not checked: your photo does not show enough of your body.');
+  if (neckDiff != null && neckDiff > LIMITS.bodyFail)
+    add('neck-height', 'Neckline', 'warn', 'The neck and shoulder line look different, usually because the new top covers or shows more of the shoulders.');
   if (pd != null) add('pose', 'Pose', pd <= LIMITS.posePass ? 'pass' : pd <= LIMITS.poseFail ? 'warn' : 'fail', pd <= LIMITS.posePass ? 'Same pose as your photo.' : 'The pose differs from your photo.');
 
   // ----- clothing -----

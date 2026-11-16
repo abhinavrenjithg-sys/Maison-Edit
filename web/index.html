@@ -1309,6 +1309,30 @@ async function checkBodyPhoto(source, retry) {
   }
   if (drawerView === 'real') renderDrawer();
 }
+/* The try-on models work in 3:4 and stretch anything else, which distorts faces.
+   Pad the photo to 3:4 with its own edge colour instead (no stretching, nothing cut off). */
+function padTo34(src) {
+  return new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => {
+      const r = i.width / i.height, T = 3 / 4;
+      if (Math.abs(r - T) < .01) return res({ src, w: i.width, h: i.height });
+      const w = r > T ? i.width : Math.round(i.height * T), h = r > T ? Math.round(i.width / T) : i.height;
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const x = c.getContext('2d', { willReadFrequently: true });
+      const e = document.createElement('canvas'); e.width = i.width; e.height = i.height;
+      const ex = e.getContext('2d', { willReadFrequently: true }); ex.drawImage(i, 0, 0);
+      const strip = r > T ? [ex.getImageData(0, 0, i.width, 4), ex.getImageData(0, i.height - 4, i.width, 4)] : [ex.getImageData(0, 0, 4, i.height), ex.getImageData(i.width - 4, 0, 4, i.height)];
+      let s = [0, 0, 0], n = 0;
+      strip.forEach(d => { for (let k = 0; k < d.data.length; k += 4) { s[0] += d.data[k]; s[1] += d.data[k + 1]; s[2] += d.data[k + 2]; n++; } });
+      x.fillStyle = `rgb(${s.map(v => Math.round(v / n)).join(',')})`; x.fillRect(0, 0, w, h);
+      x.drawImage(i, (w - i.width) / 2, (h - i.height) / 2);
+      res({ src: c.toDataURL('image/jpeg', .9), w, h });
+    };
+    i.onerror = () => rej(new Error('Your photo could not be opened'));
+    i.src = src;
+  });
+}
 async function generateLook() {
   if (aiState.busy || !profile.body || !personCheck.ok) return;
   if (IN_APP && !apiBase()) {
@@ -1326,9 +1350,10 @@ async function generateLook() {
     const images = await Promise.all(keys.map(productImage));
     const items = keys.map((k, i) => ({ c: k[0], name: `${STORES[P[k].s]} ${P[k].n}`, image: images[i] }));
     const pc = personCheck.data;
+    const person = await padTo34(profile.body);
     const res = await fetch(apiBase() + '/api/tryon', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ person: profile.body, frame: profile.bodyFrame || 'full', face: m.faceCrop(pc.canvas, pc.analysis), width: pc.canvas.width, height: pc.canvas.height, items })
+      body: JSON.stringify({ person: person.src, frame: profile.bodyFrame || 'full', face: m.faceCrop(pc.canvas, pc.analysis), width: person.w, height: person.h, items })
     });
     const j = await res.json().catch(() => ({}));
     if (res.status === 404 && !j.error) throw new Error('The AI server is not running on this site. Start it with: node serve.mjs');
