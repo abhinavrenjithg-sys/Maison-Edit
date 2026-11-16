@@ -25,11 +25,12 @@ serve.mjs            small local web server, no dependencies
 
 ## AI try-on ("See it on me")
 
-Upload a full-body photo and Gemini creates a realistic photo of you wearing the selected look.
+Upload a full-body photo and AI creates a realistic photo of you wearing the selected look. Copy `.env.example` to `.env` and pick a provider:
 
-1. Copy `.env.example` to `.env` and put your key in `GEMINI_API_KEY` (from https://aistudio.google.com/apikey).
-2. Image generation is a paid Gemini feature: turn on billing for the key's project in Google AI Studio.
-3. Run `node serve.mjs`. The key stays on the server; it is never sent to the browser, and `.env` is not committed.
+- **Free (default, `AI_PROVIDER=free`)**: [OOTDiffusion](https://huggingface.co/spaces/levihsu/OOTDiffusion) on Hugging Face changes the **top and skirt** (shoes and bags stay as in the photo). Without an account the daily GPU allowance is about one minute, so create a free account and a *Read* token at https://huggingface.co/settings/tokens and put it in `HF_TOKEN`. Takes 1–3 minutes per look.
+- **Gemini (`AI_PROVIDER=gemini`)**: changes the whole outfit and is faster, but image generation needs billing on the key in Google AI Studio. Put the key in `GEMINI_API_KEY`.
+
+Run `node serve.mjs`. Keys stay on the server; they are never sent to the browser, and `.env` is not committed.
 
 In the Android app, open *Profile → See the outfit on my photo* and enter the server address shown on the computer running `serve.mjs` (for example `http://192.168.1.5:5173`, same Wi-Fi).
 

@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises';
 import { readFileSync, existsSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tryOnFree, friendlyFreeError } from './ai-free.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const ROOT = join(HERE, 'web');
@@ -22,6 +23,8 @@ if (existsSync(envFile)) {
 const PORT = +process.env.PORT || 5173;
 const KEY = process.env.GEMINI_API_KEY || '';
 const MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
+// "free" = OOTDiffusion on Hugging Face (top + skirt, optional free HF_TOKEN); "gemini" = paid, whole outfit
+const PROVIDER = (process.env.AI_PROVIDER || 'free').toLowerCase();
 const MAX_BODY = 20 * 1024 * 1024;
 
 const TYPES = {
@@ -72,7 +75,22 @@ ${extra ? 'Extra request: ' + String(extra).slice(0, 300) : ''}
 Return only the image.`;
 }
 
+async function tryOnWithFree(req, res) {
+  let body;
+  try { body = JSON.parse(await readBody(req)); } catch (e) { return sendJSON(res, 400, { error: e.message || 'Bad request' }); }
+  if (!splitDataUrl(body.person)) return sendJSON(res, 400, { error: 'Add a photo of yourself first.' });
+  const items = (Array.isArray(body.items) ? body.items : []).filter(it => splitDataUrl(it.image));
+  try {
+    const r = await tryOnFree({ person: body.person, items });
+    sendJSON(res, 200, { ...r, provider: 'free' });
+  } catch (e) {
+    console.error('Free try-on failed:', e.message);
+    sendJSON(res, 502, { error: friendlyFreeError(e) });
+  }
+}
+
 async function tryOn(req, res) {
+  if (PROVIDER !== 'gemini') return tryOnWithFree(req, res);
   if (!KEY) return sendJSON(res, 503, { error: 'The AI try-on is not set up: add GEMINI_API_KEY to the .env file and restart the server.' });
   let body;
   try { body = JSON.parse(await readBody(req)); } catch (e) { return sendJSON(res, 400, { error: e.message || 'Bad request' }); }
@@ -108,7 +126,7 @@ async function tryOn(req, res) {
       return sendJSON(res, 422, { error: why && /SAFETY|BLOCK|PROHIBITED/i.test(why) ? 'The AI declined this photo. Try a different photo.' : 'The AI did not return an image. Try again.' });
     }
     const d = img.inlineData || img.inline_data;
-    sendJSON(res, 200, { image: `data:${d.mimeType || d.mime_type || 'image/png'};base64,${d.data}`, model: MODEL });
+    sendJSON(res, 200, { image: `data:${d.mimeType || d.mime_type || 'image/png'};base64,${d.data}`, model: MODEL, provider: 'gemini', applied: items.map(i => i.c), skipped: [] });
   } catch (e) {
     console.error('Try-on failed', e.message);
     sendJSON(res, 504, { error: e.name === 'TimeoutError' ? 'The AI took too long. Try again.' : 'Could not reach the AI service.' });
@@ -119,7 +137,7 @@ createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   if (url.pathname.startsWith('/api/')) {
     if (req.method === 'OPTIONS') { res.writeHead(204, CORS); res.end(); return; }
-    if (url.pathname === '/api/status') return sendJSON(res, 200, { ai: !!KEY, model: MODEL });
+    if (url.pathname === '/api/status') return sendJSON(res, 200, { provider: PROVIDER, ai: PROVIDER === 'gemini' ? !!KEY : true, hfToken: !!process.env.HF_TOKEN, model: PROVIDER === 'gemini' ? MODEL : 'OOTDiffusion' });
     if (url.pathname === '/api/tryon' && req.method === 'POST') return tryOn(req, res);
     return sendJSON(res, 404, { error: 'Not found' });
   }
@@ -134,4 +152,6 @@ createServer(async (req, res) => {
   } catch {
     res.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not found');
   }
-}).listen(PORT, () => console.log(`Maison Edit running at http://localhost:${PORT}  (AI try-on: ${KEY ? 'on, ' + MODEL : 'off, no GEMINI_API_KEY'})`));
+}).listen(PORT, () => console.log(`Maison Edit running at http://localhost:${PORT}  (AI try-on: ${PROVIDER === 'gemini'
+  ? (KEY ? 'Gemini, ' + MODEL : 'Gemini, but no GEMINI_API_KEY')
+  : 'free OOTDiffusion' + (process.env.HF_TOKEN ? ' with HF_TOKEN' : ' without HF_TOKEN (small daily limit)')})`));
