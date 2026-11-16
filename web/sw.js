@@ -1,7 +1,7 @@
 /* Maison Edit service worker: app shell offline, product photos cached after first view. */
-const SHELL = 'me-shell-v2';
-const MEDIA = 'me-media-v2';
-const SHELL_FILES = ['./', 'index.html', 'avatar.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
+const SHELL = 'me-shell-v3';
+const MEDIA = 'me-media-v3';
+const SHELL_FILES = ['./', 'index.html', 'avatar.js', 'identity.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(SHELL).then(c => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));

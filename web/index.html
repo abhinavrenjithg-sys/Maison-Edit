@@ -264,6 +264,20 @@ svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stro
 .tips ul{margin:8px 0 0 18px;color:var(--ink-2);line-height:1.6}
 .srv{width:100%;height:40px;border-radius:8px;border:1px solid var(--line);background:#fff;padding:0 12px;font:inherit;margin:8px 0}
 .ai-err{background:#f8e9e9;color:#7a1f2e;border-radius:8px;padding:10px 12px;margin:6px 0 10px;line-height:1.45}
+.ai-warn{background:#fbf3e2;color:#6b4a0e;border-radius:8px;padding:10px 12px;margin:6px 0 10px;line-height:1.45}
+.ai-ph img.dim{filter:blur(14px) saturate(.6);transform:scale(1.06)}
+.ai-wait.fail{background:rgba(239,237,233,.6)}
+.ai-wait.fail b{color:#7a1f2e}
+.ai-tag{position:absolute;left:8px;bottom:8px;background:rgba(21,21,21,.78);color:#fff;font-size:.82em;padding:4px 8px;border-radius:6px}
+.qa{border-radius:10px;padding:10px 12px;margin:0 0 10px;background:#fff;border:1px solid var(--line)}
+.qa-h{font-weight:600;margin-bottom:2px}
+.qa.pass .qa-h{color:#1f5e3a}.qa.warn .qa-h,.qa.unverified .qa-h{color:#6b4a0e}.qa.fail .qa-h{color:#7a1f2e}
+.qa-s{color:var(--ink-2);margin-bottom:6px;line-height:1.4}
+.qa ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.qa li{display:flex;gap:8px;align-items:flex-start;line-height:1.35;color:var(--ink-2)}
+.qa li b{flex:none;width:16px;height:16px;border-radius:50%;display:grid;place-items:center;font-size:10px;color:#fff;margin-top:1px}
+.qa li.pass b{background:#2f7a4f}.qa li.warn b{background:#b07d1a}.qa li.fail b{background:#a3283b}.qa li.skip b{background:var(--mute)}
+.qa li em{font-style:normal;color:var(--ink);font-weight:500}
 #stage.me #meBar{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
 .sws{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 18px}
 .sw{width:34px;height:34px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12);position:relative;display:grid;place-items:center;font-size:9px;font-weight:600;color:var(--ink-2)}
@@ -1241,7 +1255,10 @@ function renderAvatarSettings() {
 /* ---------- AI try-on: a realistic photo of the shopper in this look (Gemini, via our server) ---------- */
 const IN_APP = location.hostname === 'appassets.androidplatform.net';
 const apiBase = () => IN_APP ? String(profile.server || '').trim().replace(/\/+$/, '') : '';
-let aiState = { busy: false, result: null, error: null };
+let aiState = { busy: false, stage: '', result: null, raw: null, report: null, error: null, showRaw: false, showAnyway: false, attempts: 0 };
+/* Identity check of the shopper's photo (runs on this device, see identity.js). Not stored: redone after a reload. */
+let personCheck = { status: 'idle', forSrc: null, ok: false, issues: [], data: null };
+const identityLib = () => import('./identity.js');
 let sheetHi = null;
 function productImage(key) {
   // the product's own photo, cut from the full-size product sheet
@@ -1258,66 +1275,141 @@ function loadBodyPhoto(file) {
   if (!file || !/^image\//.test(file.type)) { toast('Please choose a photo'); return; }
   const url = URL.createObjectURL(file), i = new Image();
   i.onload = () => {
-    const k = Math.min(1, 1024 / Math.max(i.width, i.height));
-    const c = document.createElement('canvas'); c.width = Math.round(i.width * k); c.height = Math.round(i.height * k);
-    const x = c.getContext('2d');
-    x.fillStyle = '#f2f0ec'; x.fillRect(0, 0, c.width, c.height); // transparent photos would turn black
-    x.drawImage(i, 0, 0, c.width, c.height);
+    // a sharper copy (up to 1600 px) for the face check and face restore; a lighter one (1280 px) is kept and sent
+    const full = document.createElement('canvas'), kf = Math.min(1, 1600 / Math.max(i.width, i.height));
+    full.width = Math.round(i.width * kf); full.height = Math.round(i.height * kf);
+    const fx = full.getContext('2d', { willReadFrequently: true });
+    fx.fillStyle = '#f2f0ec'; fx.fillRect(0, 0, full.width, full.height); // transparent photos would turn black
+    fx.drawImage(i, 0, 0, full.width, full.height);
     URL.revokeObjectURL(url);
-    profile.body = c.toDataURL('image/jpeg', .88);
-    aiState = { busy: false, result: null, error: null };
-    persist(); renderDrawer();
+    const k = Math.min(1, 1280 / Math.max(full.width, full.height));
+    const c = document.createElement('canvas'); c.width = Math.round(full.width * k); c.height = Math.round(full.height * k);
+    c.getContext('2d').drawImage(full, 0, 0, c.width, c.height);
+    profile.body = c.toDataURL('image/jpeg', .9);
+    aiState = { busy: false, stage: '', result: null, raw: null, report: null, error: null, showRaw: false, showAnyway: false, attempts: 0 };
+    persist(); checkBodyPhoto(full);
   };
   i.onerror = () => { URL.revokeObjectURL(url); toast('That photo could not be opened'); };
   i.src = url;
 }
+async function checkBodyPhoto(source, retry) {
+  const src = profile.body;
+  if (!src || (personCheck.forSrc === src && !retry)) return; // errors are retried only when asked
+  personCheck = { status: 'checking', forSrc: src, ok: false, issues: [], data: null };
+  if (drawerView === 'real') renderDrawer();
+  try {
+    const m = await identityLib();
+    const r = await m.analysePerson(source || src);
+    if (profile.body !== src) return; // a newer photo was chosen meanwhile
+    personCheck = { status: 'done', forSrc: src, ok: r.ok, issues: r.issues, data: r };
+  } catch (e) {
+    console.error('Photo check failed', e);
+    if (profile.body !== src) return;
+    personCheck = { status: 'error', forSrc: src, ok: false, issues: [], data: null };
+  }
+  if (drawerView === 'real') renderDrawer();
+}
 async function generateLook() {
-  if (aiState.busy || !profile.body) return;
+  if (aiState.busy || !profile.body || !personCheck.ok) return;
   if (IN_APP && !apiBase()) {
     aiState.error = 'Enter the address of the computer running the Maison Edit server, for example http://192.168.1.5:5173.';
     renderDrawer(); return;
   }
-  aiState = { busy: true, result: aiState.result, error: null };
+  aiState = { ...aiState, busy: true, stage: 'make', error: null, note: null, showRaw: false, showAnyway: false };
   renderDrawer();
   const msgs = ['Dressing you…', 'Matching the fabrics…', 'Adjusting the fit…', 'Waiting for a free GPU…', 'Almost there…'];
   let mi = 0;
-  const iv = setInterval(() => { const m = $('#aiMsg'); if (m) m.textContent = msgs[++mi % msgs.length]; }, 3500);
+  const iv = setInterval(() => { const m = $('#aiMsg'); if (m && aiState.stage === 'make') m.textContent = msgs[++mi % msgs.length]; }, 3500);
   try {
+    const m = await identityLib();
     const keys = ORDER.map(c => look[c]);
     const images = await Promise.all(keys.map(productImage));
+    const items = keys.map((k, i) => ({ c: k[0], name: `${STORES[P[k].s]} ${P[k].n}`, image: images[i] }));
+    const pc = personCheck.data;
     const res = await fetch(apiBase() + '/api/tryon', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ person: profile.body, frame: profile.bodyFrame || 'full', items: keys.map((k, i) => ({ c: k[0], name: `${STORES[P[k].s]} ${P[k].n}`, image: images[i] })) })
+      body: JSON.stringify({ person: profile.body, frame: profile.bodyFrame || 'full', face: m.faceCrop(pc.canvas, pc.analysis), width: pc.canvas.width, height: pc.canvas.height, items })
     });
     const j = await res.json().catch(() => ({}));
     if (res.status === 404 && !j.error) throw new Error('The AI server is not running on this site. Start it with: node serve.mjs');
     if (!res.ok || !j.image) throw new Error(j.error || 'Could not create the image. Try again.');
-    aiState.result = j.image;
     const NAMES = { t: 'top', k: 'skirt', s: 'shoes', g: 'bag' };
     const list = a => a.map(c => NAMES[c]).join(' and ');
     aiState.note = !(j.skipped && j.skipped.length) ? null
       : (profile.bodyFrame || 'full') === 'upper'
         ? 'Upper-body photo: only the top was changed. Use a full-body photo to try the skirt too.'
         : `The free AI changed the ${list(j.applied || [])}. The ${list(j.skipped)} are not supported yet, so they stay as in your photo.`;
-    toast('Your look is ready');
+    aiState.attempts++;
+    // quality check: is it really them? restore the face if it drifted
+    aiState.stage = 'check';
+    const msg = $('#aiMsg'); if (msg) msg.textContent = 'Checking it’s really you…';
+    const applied = Array.isArray(j.applied) ? items.filter(it => j.applied.includes(it.c)) : items;
+    try {
+      const q = await m.checkAndRestore(pc, j.image, applied.map(it => ({ c: it.c, name: P[keys.find(k => k[0] === it.c)].n, image: it.image })));
+      Object.assign(aiState, { result: q.image, raw: q.raw, report: q });
+      toast(q.verdict === 'fail' ? 'The result did not pass the likeness check' : q.restored ? 'Your look is ready · face restored' : 'Your look is ready');
+    } catch (e) {
+      console.error('Quality check failed', e);
+      Object.assign(aiState, { result: j.image, raw: j.image, report: { verdict: 'unverified', summary: 'The likeness check could not run, so this result is not verified. Check your connection and try again.', checks: [] } });
+    }
   } catch (e) {
     aiState.error = /fetch|network|load failed/i.test(e.message) ? 'Could not reach the AI server. Check that it is running and the address is right.' : e.message;
   } finally {
-    clearInterval(iv); aiState.busy = false;
+    clearInterval(iv); aiState.busy = false; aiState.stage = '';
     if (drawerView === 'real') renderDrawer();
   }
 }
+async function recheckResult() {
+  if (!aiState.raw || !personCheck.data || aiState.busy) return;
+  aiState.busy = true; aiState.stage = 'check'; renderDrawer();
+  try {
+    const m = await identityLib();
+    const keys = ORDER.map(c => look[c]), images = await Promise.all(keys.map(productImage));
+    const q = await m.checkAndRestore(personCheck.data, aiState.raw, keys.map((k, i) => ({ c: k[0], name: P[k].n, image: images[i] })));
+    Object.assign(aiState, { result: q.image, report: q });
+  } catch { toast('The likeness check still could not run'); }
+  aiState.busy = false; aiState.stage = ''; renderDrawer();
+}
+const CHECK_ICON = { pass: '✓', warn: '!', fail: '✕', skip: '–' };
+function reportHTML(r) {
+  if (!r) return '';
+  return `<div class="qa ${r.verdict}"><div class="qa-h">${r.verdict === 'pass' ? 'Likeness check passed' : r.verdict === 'warn' ? 'Likeness check: some notes' : r.verdict === 'fail' ? 'Likeness check failed' : 'Not verified'}</div>
+    <div class="qa-s">${esc(r.summary)}</div>
+    ${r.checks.length ? `<ul>${r.checks.map(c => `<li class="${c.status}"><b>${CHECK_ICON[c.status]}</b><span><em>${esc(c.label)}</em> ${esc(c.detail)}</span></li>`).join('')}</ul>` : ''}</div>`;
+}
 function renderReal() {
   $('#dTitle').textContent = 'See it on me · AI';
-  const b = profile.body, r = aiState, done = r.result && !r.busy;
+  const b = profile.body, r = aiState, rep = r.report, done = r.result && !r.busy;
+  if (b) checkBodyPhoto();
+  identityLib().then(m => m.preload());
+  const pc = personCheck, checking = b && pc.status === 'checking';
+  const failed = done && rep && rep.verdict === 'fail';
+  const shown = done ? (r.showRaw ? r.raw : r.result) : null;
   const pickers = '<input type="file" accept="image/*" capture="environment" id="bdCam" hidden><input type="file" accept="image/*" id="bdFile" hidden>';
-  const ph = done ? `<img src="${r.result}" alt="You wearing the selected look">`
+  const ph = done ? `<img src="${shown}" alt="You wearing the selected look"${failed && !r.showAnyway ? ' class="dim"' : ''}>`
     : b ? `<img src="${b}" alt="Your photo">`
-    : '<div class="hint">Use a full-body photo: head to feet in the frame, facing the camera, in good light.</div>';
+    : '<div class="hint">Use a full-body photo of just you: head to feet in the frame, facing the camera, face clearly visible, in good light.</div>';
+  const wait = r.busy ? `<div class="ai-wait"><div><div class="sp"></div><span id="aiMsg">${r.stage === 'check' ? 'Checking it’s really you…' : 'Dressing you…'}</span><br><small class="note">${r.stage === 'check' ? 'Comparing the face and body with your photo' : 'Can take 1–3 minutes'}</small></div></div>`
+    : checking ? '<div class="ai-wait"><div><div class="sp"></div><span>Checking your photo…</span><br><small class="note">Finding your face and body, on this device</small></div></div>'
+    : failed && !r.showAnyway ? '<div class="ai-wait fail"><div><b>This doesn’t look enough like you</b><br><small class="note">We don’t keep results that change who you are.</small><br><button class="lk" id="aiAnyway">Show it anyway</button></div></div>' : '';
+  const tag = done && rep && rep.restored && !(failed && !r.showAnyway) ? `<div class="ai-tag">${r.showRaw ? 'AI’s original · face changed' : 'Your face, restored from your photo'}</div>` : '';
+  // an upper-body photo is a choice, not a problem: drop the "whole body" warning then
+  const issues = pc.issues.filter(i => !(profile.bodyFrame === 'upper' && /whole body/i.test(i.text)));
+  const photoIssues = b && pc.status === 'done' && issues.length && !done
+    ? `<div class="${pc.ok ? 'ai-warn' : 'ai-err'}">${issues.map(i => esc(i.text)).join('<br>')}</div>` : '';
+  const photoErr = b && pc.status === 'error' ? '<div class="ai-err">The photo checker could not load, so your likeness cannot be verified yet. Check your internet connection. <button class="lk" id="pcRetry">Try again</button></div>' : '';
+  const links = [];
+  if (done && !(failed && !r.showAnyway)) {
+    if (!failed) links.push(`<a class="lk" download="maison-edit-look.jpg" href="${r.result}">Save image</a>`);
+    if (rep && rep.restored) links.push(`<button class="lk" id="aiRaw">${r.showRaw ? 'Show restored' : 'Compare with AI’s original'}</button>`);
+  }
+  if (done && rep && rep.verdict === 'unverified') links.push('<button class="lk" id="aiRecheck">Run the check again</button>');
+  if (done) links.push('<button class="lk" id="aiOrig">Back to my photo</button>');
+  if (b) links.push('<button class="lk" data-pick="bdCam">New photo</button><button class="lk" data-pick="bdFile">Upload another</button>');
   dBody.innerHTML = `${pickers}
-    <p class="note">AI creates a realistic photo of you wearing this look.</p>
-    <div class="ai-ph${done ? ' contain' : ''}">${ph}${r.busy ? '<div class="ai-wait"><div><div class="sp"></div><span id="aiMsg">Dressing you…</span><br><small class="note">Can take 1–3 minutes</small></div></div>' : ''}</div>
-    ${r.error ? `<div class="ai-err">${esc(r.error)}</div>` : ''}
+    <p class="note">AI shows you, not a model, wearing this look. Every result is checked against your photo for your face, skin tone, hair and body shape.</p>
+    <div class="ai-ph${done ? ' contain' : ''}">${ph}${tag}${wait}</div>
+    ${r.error ? `<div class="ai-err">${esc(r.error)}</div>` : ''}${photoErr}${photoIssues}
     ${done && r.note ? `<p class="note" style="margin-bottom:8px">${esc(r.note)}</p>` : ''}
     ${b && !done ? `<div class="lab">MY PHOTO SHOWS</div>
       <div class="seg" id="aiFrame">${[['full', 'Full body'], ['upper', 'Upper body']].map(([v, l]) => `<button class="${(profile.bodyFrame || 'full') === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
@@ -1328,18 +1420,24 @@ function renderReal() {
       <li>Plain background, nothing in front of you</li>
       <li>Hair behind your shoulders so the neckline shows</li>
       <li>Fitted, simple clothes work best underneath</li></ul></details>` : ''}
-    ${b ? `<div class="fe-links">${done ? `<a class="lk" download="maison-edit-look.png" href="${r.result}">Save image</a><button class="lk" id="aiOrig">Back to my photo</button>` : ''}<button class="lk" data-pick="bdCam">New photo</button><button class="lk" data-pick="bdFile">Upload another</button></div>` : ''}
+    ${done ? reportHTML(rep) : ''}
+    ${links.length ? `<div class="fe-links">${links.join('')}</div>` : ''}
     <div class="lab" style="margin-top:12px">THIS LOOK</div><div class="ai-items">${thumbs(look)}</div>
     ${IN_APP ? `<div class="lab">AI SERVER</div><input id="aiServer" class="srv" placeholder="http://192.168.1.5:5173" value="${esc(profile.server || '')}" inputmode="url" autocomplete="off">` : ''}
-    <p class="note" style="margin-top:10px">Your photo and the product photos are sent to an AI service (a free model on Hugging Face, or Google Gemini) to make the image. Your photo is kept only on this device.</p>`;
+    <p class="note" style="margin-top:10px">Your photo and the product photos are sent to an AI service (a free model on Hugging Face, or Google Gemini, which also gets a close-up of your face) to make the image. The likeness check and face restore run on this device. Your photo is kept only on this device.</p>`;
   paintThumbs(dBody);
+  const canGo = b && pc.status === 'done' && pc.ok;
   dFoot.innerHTML = b
-    ? `<button class="btn" id="aiGo" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Working…' : r.result ? 'Generate again' : 'Generate my look'}</button>`
+    ? `<button class="btn" id="aiGo" ${r.busy || !canGo ? 'disabled' : ''}>${r.busy ? 'Working…' : checking ? 'Checking your photo…' : !canGo ? 'Choose a different photo' : r.result ? (failed ? 'Regenerate' : 'Generate again') : 'Generate my look'}</button>${r.attempts > 1 ? `<div class="note" style="text-align:center">Attempt ${r.attempts}</div>` : ''}`
     : '<button class="btn" data-pick="bdCam">Take a full-body photo</button><button class="btn ghost" data-pick="bdFile">Upload a photo</button>';
   drawer.querySelectorAll('[data-pick]').forEach(btn => btn.addEventListener('click', () => $('#' + btn.dataset.pick).click()));
   ['#bdCam', '#bdFile'].forEach(s => $(s).addEventListener('change', e => { loadBodyPhoto(e.target.files[0]); e.target.value = ''; }));
   $('#aiGo')?.addEventListener('click', generateLook);
-  $('#aiOrig')?.addEventListener('click', () => { aiState.result = null; renderDrawer(); });
+  $('#aiOrig')?.addEventListener('click', () => { aiState.result = null; aiState.report = null; renderDrawer(); });
+  $('#aiRaw')?.addEventListener('click', () => { aiState.showRaw = !aiState.showRaw; renderDrawer(); });
+  $('#aiAnyway')?.addEventListener('click', () => { aiState.showAnyway = true; renderDrawer(); });
+  $('#aiRecheck')?.addEventListener('click', recheckResult);
+  $('#pcRetry')?.addEventListener('click', () => checkBodyPhoto(null, true));
   $('#aiServer')?.addEventListener('change', e => { profile.server = e.target.value.trim(); persist(); });
   $('#aiFrame')?.addEventListener('click', e => { const v = e.target.closest('[data-v]')?.dataset.v; if (!v) return; profile.bodyFrame = v; persist(); renderDrawer(); });
 }
