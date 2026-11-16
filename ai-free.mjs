@@ -62,16 +62,21 @@ async function fetchResultImage(out, token) {
  * person: data URL of a full-body photo; items: [{ c: 't'|'k'|'s'|'g', image: data URL }]
  * Returns { image: data URL, applied: ['t','k'], skipped: ['s','g'] }.
  */
-export async function tryOnFree({ person, items }, { token = process.env.HF_TOKEN, onStep } = {}) {
+export async function tryOnFree({ person, items, frame = 'full' }, { token = process.env.HF_TOKEN, onStep } = {}) {
   const CAT = { t: 'Upper-body', k: 'Lower-body' };
-  const usable = items.filter(it => CAT[it.c]).sort((a, b) => (a.c === 't' ? -1 : 1) - (b.c === 't' ? -1 : 1));
-  if (!usable.length) throw new Error('The free AI can change tops and skirts only.');
+  // Upper-body photos: only the top, with the half-body model (trained on waist-up photos).
+  // Full-body photos: top, then skirt, with the full-body model.
+  const upper = frame === 'upper';
+  const usable = items.filter(it => upper ? it.c === 't' : CAT[it.c]).sort((a, b) => (a.c === 't' ? -1 : 1) - (b.c === 't' ? -1 : 1));
+  if (!usable.length) throw new Error(upper ? 'Pick a top to try on with an upper-body photo.' : 'The free AI can change tops and skirts only.');
   let current = dataUrlToBlob(person), name = 'person.jpg';
   const applied = [];
   for (const it of usable) {
     onStep && onStep(it.c);
     const [vton, garm] = await Promise.all([upload(current, name, token), upload(dataUrlToBlob(it.image), `garment-${it.c}.jpg`, token)]);
-    const out = await call('process_dc', [vton, garm, CAT[it.c], 1, 20, 2, -1], token);
+    const out = upper
+      ? await call('process_hd', [vton, garm, 1, 20, 2, -1], token)
+      : await call('process_dc', [vton, garm, CAT[it.c], 1, 20, 2, -1], token);
     current = (await fetchResultImage(out, token)).blob; name = `step-${it.c}.png`;
     applied.push(it.c);
   }

@@ -81,7 +81,7 @@ async function tryOnWithFree(req, res) {
   if (!splitDataUrl(body.person)) return sendJSON(res, 400, { error: 'Add a photo of yourself first.' });
   const items = (Array.isArray(body.items) ? body.items : []).filter(it => splitDataUrl(it.image));
   try {
-    const r = await tryOnFree({ person: body.person, items });
+    const r = await tryOnFree({ person: body.person, items, frame: body.frame === 'upper' ? 'upper' : 'full' });
     sendJSON(res, 200, { ...r, provider: 'free' });
   } catch (e) {
     console.error('Free try-on failed:', e.message);
